@@ -1,0 +1,9 @@
+" vim-rgrep: test configuration.
+set nocompatible
+set laststatus=2
+
+let s:root = expand('<sfile>:p:h:h')
+execute 'set runtimepath^=' . fnameescape(s:root)
+
+filetype plugin indent on
+syntax on
