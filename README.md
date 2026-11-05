@@ -17,7 +17,6 @@ changing the result view.
   (`g:rgrep_open_mode`).
 - Result filtering with multiple AND conditions and negative conditions
   (`!pattern`).
-- Delete one result or all results of one file; restore with `u`.
 - Export to quickfix or the argument list, open all matched files, and
   batch-replace matched lines.
 - Persistent search history.
@@ -103,6 +102,7 @@ contain spaces when the last word could be a directory.
 | `Ctrl-d` / `Ctrl-u` | Move half a page |
 | `<CR>` / `o` | Open the hit |
 | `d` | Remove the hit from the results |
+| Visual selection + `d` | Remove all selected hits as one undoable group |
 | `D` | Remove all hits of the current file |
 | `u` | Restore the last removed hit or file group |
 | `f` | Add an AND filter; `!pattern` excludes |
@@ -113,6 +113,7 @@ contain spaces when the last word could be a directory.
 | `r` | Re-run the current search |
 | `H` | Select a previous search |
 | `Q` | Send results to quickfix and open it |
+| `?` | Show / hide the keymap help panel |
 | `q` | Close the search tab |
 | `/` | Vim search inside the results |
 
@@ -123,6 +124,7 @@ contain spaces when the last word could be a directory.
 | `<CR>` / `o` | Open the previewed file |
 | `s` | New search |
 | `f` | Add a filter |
+| `?` | Show / hide the keymap help panel |
 | `q` | Close the search tab |
 
 ### Customization
@@ -137,6 +139,7 @@ let g:rgrep_keymaps = {
   \ 'delete': 'd',
   \ 'delete_file': 'D',
   \ 'history': 'H',
+  \ 'help': '?',
   \ }
 
 let g:rgrep_keymaps_enabled = 0   " disable all plugin keymaps
@@ -145,7 +148,7 @@ let g:rgrep_keymaps_enabled = 0   " disable all plugin keymaps
 A key can be a string or a list of strings; an empty string disables it.
 Available actions: `open_file`, `open_file_tab`, `quit`, `toggle_preview`,
 `hide_preview`, `delete`, `delete_file`, `restore`, `filter`, `clear_filter`,
-`refresh`, `search`, `quickfix`, `next_file`, `prev_file`, `history`.
+`refresh`, `search`, `quickfix`, `next_file`, `prev_file`, `history`, `help`.
 
 Global mappings can use `<Plug>(rgrep)` and `<Plug>(rgrep-word)`.
 
@@ -176,7 +179,7 @@ Global mappings can use `<Plug>(rgrep)` and `<Plug>(rgrep-word)`.
 | `g:rgrep_preview_context` | `150` | Context lines in chunked previews |
 | `g:rgrep_preview_debounce_ms` | `30` | Preview update debounce |
 | `g:rgrep_render_ms` | `50` | Result redraw throttle |
-| `g:rgrep_statusline` | `1` | Custom result statusline |
+| `g:rgrep_statusline` | `1` | Result statusline with counts, filter, and help hint |
 | `g:rgrep_filetypes` | `{}` | Preview filetype overrides |
 | `g:rgrep_open_all_limit` | `10` | Confirmation threshold for `RgrepOpenAll` |
 | `g:rgrep_replace_confirm` | `1` | Confirm before `RgrepReplace` |

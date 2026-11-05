@@ -34,6 +34,8 @@ function! s:empty_state() abort
         \ 'truncated': 0,
         \ 'dirty': 0,
         \ 'preview_id': -1,
+        \ 'help': 0,
+        \ 'help_opened_preview': 0,
         \ 'cmd': [],
         \ 'engine': 'rg',
         \ }
@@ -400,7 +402,8 @@ function! s:setup_list_buffer() abort
   setlocal bufhidden=wipe
   setlocal noswapfile
   setlocal nobuflisted
-  setlocal nonumber
+  setlocal number
+  setlocal numberwidth=4
   setlocal norelativenumber
   setlocal nolist
   setlocal nowrap
@@ -477,6 +480,7 @@ function! s:default_keymaps() abort
         \ 'next_file': ']f',
         \ 'prev_file': '[f',
         \ 'history': 'H',
+        \ 'help': '?',
         \ }
 endfunction
 
@@ -493,21 +497,46 @@ function! rgrep#keymaps() abort
   return s:merged_keymaps()
 endfunction
 
+function! s:key_label(action) abort
+  let keys = get(s:merged_keymaps(), a:action, '')
+  if type(keys) == v:t_list
+    let keys = join(keys, ' / ')
+  endif
+  return type(keys) == v:t_string ? keys : ''
+endfunction
+
+function! s:help_key() abort
+  return s:key_label('help')
+endfunction
+
 function! s:clear_list_maps() abort
   for key in get(b:, 'rgrep_mapped', [])
     execute 'silent! nunmap <buffer> ' . key
   endfor
+  for key in get(b:, 'rgrep_mapped_x', [])
+    execute 'silent! xunmap <buffer> ' . key
+  endfor
   let b:rgrep_mapped = []
+  let b:rgrep_mapped_x = []
 endfunction
 
-function! s:map_action(keys, rhs) abort
+function! s:map_action(keys, rhs, ...) abort
+  let mode = a:0 ? a:1 : 'n'
+  let command = mode ==# 'x' ? 'xnoremap' : 'nnoremap'
   let keys = type(a:keys) == v:t_list ? a:keys : [a:keys]
   for key in keys
     if type(key) != v:t_string || empty(key)
       continue
     endif
-    execute 'silent! nnoremap <buffer> <silent> ' . key . ' ' . a:rhs
-    let b:rgrep_mapped = add(get(b:, 'rgrep_mapped', []), key)
+    " <nowait> prevents a delay when another plugin has a longer global
+    " mapping that starts with this key (for example "dm" vs "d").
+    execute 'silent! ' . command . ' <buffer> <nowait> <silent> '
+          \ . key . ' ' . a:rhs
+    if mode ==# 'x'
+      let b:rgrep_mapped_x = add(get(b:, 'rgrep_mapped_x', []), key)
+    else
+      let b:rgrep_mapped = add(get(b:, 'rgrep_mapped', []), key)
+    endif
   endfor
 endfunction
 
@@ -537,11 +566,16 @@ function! s:map_list_buffer() abort
         \ 'next_file': ':<C-u>call rgrep#next_file()<CR>',
         \ 'prev_file': ':<C-u>call rgrep#prev_file()<CR>',
         \ 'history': ':<C-u>RgrepHistory<CR>',
+        \ 'help': ':<C-u>call rgrep#toggle_help()<CR>',
         \ }
 
   for [action, rhs] in items(actions)
     call s:map_action(get(maps, action, ''), rhs)
   endfor
+
+  " Visual mode: delete every selected result row.
+  call s:map_action(get(maps, 'delete', ''),
+        \ ':<C-u>call rgrep#delete_visual()<CR>', 'x')
 endfunction
 
 
@@ -588,6 +622,8 @@ function! s:start(pattern, fixed, ...) abort
   let s:st.status = 'searching'
   let s:st.next_id = 1
   let s:st.preview_id = -1
+  let s:st.help = 0
+  let s:st.help_opened_preview = 0
   let s:st.cmd = []
   let s:st.engine = engine
 
@@ -1315,6 +1351,21 @@ function! s:set_buffer_lines(buf, lines) abort
   endtry
 endfunction
 
+function! s:delete_buffer_lines(buf, first, last) abort
+  if !bufexists(a:buf) || a:first < 1 || a:last < a:first
+    return
+  endif
+
+  let was_modifiable = getbufvar(a:buf, '&modifiable')
+  call setbufvar(a:buf, '&modifiable', 1)
+  try
+    silent call deletebufline(a:buf, a:first, a:last)
+    call setbufvar(a:buf, '&modified', 0)
+  finally
+    call setbufvar(a:buf, '&modifiable', was_modifiable ? 1 : 0)
+  endtry
+endfunction
+
 function! s:set_list_cursor(lnum) abort
   if !s:tab_current() || !s:win_alive(s:st.list_win)
     return
@@ -1340,16 +1391,31 @@ function! s:update_status() abort
     return
   endif
 
+  let shown = len(s:st.shown)
+  let total = len(s:st.items)
+
   let text = ' Rgrep'
   if !empty(s:st.pattern)
     let text .= ' ' . s:st.pattern
   endif
-  let text .= printf('  %d/%d', len(s:st.shown), len(s:st.items))
+  " Show "shown/total" only when they differ or a filter is active; this
+  " avoids the confusing "42/42" display in the common unfiltered case.
+  if !empty(s:st.filters) || shown != total
+    let text .= printf('  %d/%d matches', shown, total)
+  else
+    let text .= printf('  %d matches', total)
+  endif
   if !empty(s:st.filters)
     let text .= '  filter:' . join(s:st.filters, ' & ')
   endif
   if !empty(s:st.status)
     let text .= '  ' . s:st.status
+  endif
+  if s:cfg_num('rgrep_keymaps_enabled', 1)
+    let help_key = s:help_key()
+    if !empty(help_key)
+      let text .= '  ' . help_key . (s:st.help ? ' hide help' : ' help')
+    endif
   endif
   let text .= ' '
 
@@ -1412,6 +1478,10 @@ function! s:on_cursor_moved() abort
 endfunction
 
 function! s:schedule_preview() abort
+  if s:st.help
+    return
+  endif
+
   let delay = s:cfg_num('rgrep_preview_debounce_ms', 30)
   if !exists('*timer_start') || delay <= 0
     call s:update_preview()
@@ -1430,7 +1500,7 @@ function! s:preview_cb(...) abort
 endfunction
 
 function! s:update_preview(...) abort
-  if !s:st.active || s:st.closing
+  if !s:st.active || s:st.closing || s:st.help
     return
   endif
   if !rgrep#preview#visible() || !s:tab_current()
@@ -1547,17 +1617,110 @@ function! rgrep#delete() abort
   endif
 
   let item = s:st.shown[idx]
-  let base = s:find_index(s:st.items, item.id)
+  " Without a filter, shown mirrors items one-to-one, so the item's base
+  " index is the buffer line index. With a filter, look it up once.
+  let base = idx
+  if !empty(s:st.filters) || idx >= len(s:st.items)
+        \ || s:st.items[idx].id != item.id
+    let base = s:find_index(s:st.items, item.id)
+  endif
   if base < 0
     return
   endif
 
   call remove(s:st.items, base)
+  call remove(s:st.shown, idx)
   call add(s:st.deleted, {'item': item, 'index': base})
-  let s:st.index = idx
 
-  call s:render()
-  call s:update_preview(1)
+  let s:st.index = idx
+  if s:st.index >= len(s:st.shown)
+    let s:st.index = len(s:st.shown) - 1
+  endif
+  if s:st.index < 0
+    let s:st.index = 0
+  endif
+
+  if empty(s:st.shown)
+    " The buffer must switch to the "(no results)" placeholder.
+    call s:render()
+  else
+    " Fast path: remove only the affected buffer line instead of rebuilding
+    " the complete result list on every deletion.
+    call s:delete_buffer_lines(s:st.list_buf, idx + 1, idx + 1)
+    call s:set_list_cursor(s:st.index + 1)
+    call s:update_status()
+  endif
+
+  " Update the preview asynchronously so deleting never waits for a large
+  " file to be re-read and re-highlighted.
+  call s:schedule_preview()
+endfunction
+
+function! rgrep#delete_visual() abort
+  if !s:st.active || !s:tab_current()
+    return
+  endif
+
+  let first = min([line("'<"), line("'>")]) - 1
+  let last = max([line("'<"), line("'>")]) - 1
+  if first < 0 || last < first || first >= len(s:st.shown)
+    return
+  endif
+  if last >= len(s:st.shown)
+    let last = len(s:st.shown) - 1
+  endif
+  if last < first
+    return
+  endif
+
+  let selected = s:st.shown[first : last]
+  if empty(selected)
+    return
+  endif
+
+  let ids = {}
+  for item in selected
+    let ids[item.id] = 1
+  endfor
+
+  let kept = []
+  let removed = []
+  let base = -1
+  for item in s:st.items
+    if has_key(ids, item.id)
+      if base < 0
+        let base = len(kept)
+      endif
+      call add(removed, item)
+    else
+      call add(kept, item)
+    endif
+  endfor
+  if empty(removed)
+    return
+  endif
+  let s:st.items = kept
+
+  call remove(s:st.shown, first, last)
+  call add(s:st.deleted, {'items': removed, 'index': base})
+
+  let s:st.index = first
+  if s:st.index >= len(s:st.shown)
+    let s:st.index = len(s:st.shown) - 1
+  endif
+  if s:st.index < 0
+    let s:st.index = 0
+  endif
+
+  if empty(s:st.shown)
+    call s:render()
+  else
+    call s:delete_buffer_lines(s:st.list_buf, first + 1, last + 1)
+    call s:set_list_cursor(s:st.index + 1)
+    call s:update_status()
+  endif
+
+  call s:schedule_preview()
 endfunction
 
 function! rgrep#delete_file() abort
@@ -1571,29 +1734,68 @@ function! rgrep#delete_file() abort
   endif
 
   let path = s:st.shown[idx].path
-  let start = -1
-  let removed = []
-  let i = 0
-  while i < len(s:st.items)
-    if s:st.items[i].path ==# path
-      if start < 0
-        let start = i
-      endif
-      call add(removed, remove(s:st.items, i))
-    else
-      let i += 1
-    endif
-  endwhile
 
-  if empty(removed)
+  let line_idxs = []
+  let i = 0
+  for item in s:st.shown
+    if item.path ==# path
+      call add(line_idxs, i)
+    endif
+    let i += 1
+  endfor
+  if empty(line_idxs)
     return
   endif
 
+  " Rebuild items without this path instead of removing entries one by one.
+  let kept = []
+  let removed = []
+  let start = -1
+  for item in s:st.items
+    if item.path ==# path
+      if start < 0
+        let start = len(kept)
+      endif
+      call add(removed, item)
+    else
+      call add(kept, item)
+    endif
+  endfor
+  if empty(removed)
+    return
+  endif
+  let s:st.items = kept
+
+  let last = len(line_idxs) - 1
+  while last >= 0
+    call remove(s:st.shown, line_idxs[last])
+    let last -= 1
+  endwhile
+
   call add(s:st.deleted, {'items': removed, 'index': start})
   let s:st.index = idx
+  if s:st.index >= len(s:st.shown)
+    let s:st.index = len(s:st.shown) - 1
+  endif
+  if s:st.index < 0
+    let s:st.index = 0
+  endif
 
-  call s:render()
-  call s:update_preview(1)
+  if empty(s:st.shown)
+    call s:render()
+  else
+    " Delete in reverse order so earlier buffer line numbers stay valid.
+    let last = len(line_idxs) - 1
+    while last >= 0
+      call s:delete_buffer_lines(
+            \ s:st.list_buf, line_idxs[last] + 1, line_idxs[last] + 1)
+      let last -= 1
+    endwhile
+    call s:set_list_cursor(s:st.index + 1)
+    call s:update_status()
+  endif
+
+  call s:schedule_preview()
 endfunction
 
 function! rgrep#restore() abort
@@ -1713,9 +1915,109 @@ function! rgrep#clear_filter() abort
   call s:update_preview(1)
 endfunction
 
+function! s:help_lines() abort
+  let rows = []
+  for [action, desc] in [
+        \ ['help', 'toggle this help'],
+        \ ['open_file', 'open selected result'],
+        \ ['quit', 'close search tab'],
+        \ ['toggle_preview', 'show / hide preview'],
+        \ ['hide_preview', 'hide preview'],
+        \ ['delete', 'remove current result'],
+        \ ['delete_file', 'remove all results of current file'],
+        \ ['restore', 'restore last removed result'],
+        \ ['filter', 'add filter (!pattern excludes)'],
+        \ ['clear_filter', 'clear all filters'],
+        \ ['next_file', 'next file'],
+        \ ['prev_file', 'previous file'],
+        \ ['search', 'new search (pattern [dir])'],
+        \ ['refresh', 're-run current search'],
+        \ ['history', 'choose from search history'],
+        \ ['quickfix', 'send results to quickfix'],
+        \ ]
+    let key = s:key_label(action)
+    if !empty(key)
+      call add(rows, [key, desc])
+    endif
+  endfor
+
+  let lines = [
+        \ '',
+        \ '  Rgrep keymaps',
+        \ '  -------------',
+        \ '',
+        \ ]
+  for [key, desc] in rows
+    call add(lines, printf('  %-16s %s', key, desc))
+  endfor
+
+  call extend(lines, [
+        \ '',
+        \ '  Built-in',
+        \ '  --------',
+        \ '  j / k            move selection',
+        \ '  gg / G           first / last result',
+        \ '  <C-d> / <C-u>    half page',
+        \ '  /                Vim search in results',
+        \ '  V + motion       select results, then press the delete',
+        \ '                   key to remove all selected results',
+        \ '',
+        \ '  Statusline: shown/total matches; a single number',
+        \ '  means no filter is active.',
+        \ '',
+        \ ])
+
+  let key = s:help_key()
+  if !empty(key)
+    call add(lines, '  Press ' . key . ' again to hide this help.')
+  endif
+  return lines
+endfunction
+
+function! rgrep#toggle_help() abort
+  if !s:st.active
+    return
+  endif
+
+  if s:st.help && rgrep#preview#visible()
+    let s:st.help = 0
+    let opened = s:st.help_opened_preview
+    let s:st.help_opened_preview = 0
+    if opened && !s:preview_enabled()
+      call rgrep#preview#close()
+    else
+      call s:update_preview(1)
+    endif
+    call s:update_status()
+    return
+  endif
+
+  let s:st.help = 0
+  let s:st.help_opened_preview = 0
+  let was_visible = rgrep#preview#visible()
+  if !was_visible
+    call rgrep#preview#open()
+    if !rgrep#preview#visible()
+      call s:err('cannot open the help window')
+      return
+    endif
+  endif
+
+  let s:st.help = 1
+  let s:st.help_opened_preview = was_visible ? 0 : 1
+  call rgrep#preview#show_help(s:help_lines())
+  call s:update_status()
+endfunction
+
 function! rgrep#toggle_preview() abort
   if !s:st.active
     return
+  endif
+
+  if s:st.help
+    let s:st.help = 0
+    let s:st.help_opened_preview = 0
+    call s:update_status()
   endif
 
   if rgrep#preview#visible()
@@ -1728,6 +2030,12 @@ endfunction
 function! rgrep#hide_preview() abort
   if !s:st.active
     return
+  endif
+
+  if s:st.help
+    let s:st.help = 0
+    let s:st.help_opened_preview = 0
+    call s:update_status()
   endif
 
   if rgrep#preview#visible()

@@ -9,9 +9,15 @@ let s:sid = expand('<SID>')
 function! s:define_highlights() abort
   highlight default link RgrepPath Directory
   highlight default link RgrepLoc LineNr
-  highlight default link RgrepMatch Search
+  " Use dedicated colors instead of linking to Search, so rgrep hits remain
+  " distinguishable from Vim's own search highlighting.
+  highlight default RgrepMatch
+        \ ctermfg=16 ctermbg=45 cterm=bold
+        \ guifg=#001a1a guibg=#00d7d7 gui=bold
   highlight default link RgrepPreviewLine Visual
-  highlight default link RgrepPreviewMatch Search
+  highlight default RgrepPreviewMatch
+        \ ctermfg=16 ctermbg=214 cterm=bold
+        \ guifg=#2b1a00 guibg=#ffaf5f gui=bold
 endfunction
 
 augroup rgrep_highlights

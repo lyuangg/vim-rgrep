@@ -13,7 +13,6 @@ Vim/Neovim 的递归搜索插件。使用 ripgrep（`rg`）或 `grep` 搜索，�
 - 移动选择时预览同步更新；`<CR>` 打开选中文件。
 - 文件可按“每个文件一个标签页”或“共享一个标签页”打开（`g:rgrep_open_mode`）。
 - 支持多个 AND 过滤条件及排除条件（`!pattern`）。
-- 支持删除单条结果、删除当前文件的全部结果，以及恢复删除。
 - 支持导出到 quickfix 或参数列表、打开全部匹配文件、批量替换匹配行。
 - 支持持久化搜索历史。
 - 快捷键可配置，默认不定义按键映射。
@@ -97,6 +96,7 @@ pattern 含空格且最后一个词可能是目录时，建议加引号。
 | `Ctrl-d` / `Ctrl-u` | 半页移动 |
 | `<CR>` / `o` | 打开当前结果 |
 | `d` | 从结果中删除当前条 |
+| visual 选中 + `d` | 删除全部选中结果，可用 `u` 一次恢复 |
 | `D` | 删除当前文件的全部结果 |
 | `u` | 恢复上一次删除的条目或文件组 |
 | `f` | 追加 AND 过滤条件；`!pattern` 表示排除 |
@@ -107,6 +107,7 @@ pattern 含空格且最后一个词可能是目录时，建议加引号。
 | `r` | 重跑当前搜索 |
 | `H` | 选择搜索历史 |
 | `Q` | 结果写入 quickfix 并打开 |
+| `?` | 显示 / 隐藏快捷键帮助面板 |
 | `q` | 关闭搜索标签页 |
 | `/` | 在结果中执行 Vim 搜索 |
 
@@ -117,6 +118,7 @@ pattern 含空格且最后一个词可能是目录时，建议加引号。
 | `<CR>` / `o` | 打开当前预览的文件 |
 | `s` | 新搜索 |
 | `f` | 追加过滤条件 |
+| `?` | 显示 / 隐藏快捷键帮助面板 |
 | `q` | 关闭搜索标签页 |
 
 ### 自定义
@@ -131,6 +133,7 @@ let g:rgrep_keymaps = {
   \ 'delete': 'd',
   \ 'delete_file': 'D',
   \ 'history': 'H',
+  \ 'help': '?',
   \ }
 
 let g:rgrep_keymaps_enabled = 0   " 禁用全部插件快捷键
@@ -139,7 +142,7 @@ let g:rgrep_keymaps_enabled = 0   " 禁用全部插件快捷键
 键值可以是字符串或字符串列表；设为空字符串表示禁用。可用动作：
 `open_file`、`open_file_tab`、`quit`、`toggle_preview`、`hide_preview`、
 `delete`、`delete_file`、`restore`、`filter`、`clear_filter`、`refresh`、
-`search`、`quickfix`、`next_file`、`prev_file`、`history`。
+`search`、`quickfix`、`next_file`、`prev_file`、`history`、`help`。
 
 全局映射可使用 `<Plug>(rgrep)` 和 `<Plug>(rgrep-word)`。
 
@@ -170,7 +173,7 @@ let g:rgrep_keymaps_enabled = 0   " 禁用全部插件快捷键
 | `g:rgrep_preview_context` | `150` | 分段预览的上下文行数 |
 | `g:rgrep_preview_debounce_ms` | `30` | 预览更新防抖 |
 | `g:rgrep_render_ms` | `50` | 结果重绘节流 |
-| `g:rgrep_statusline` | `1` | 自定义结果状态栏 |
+| `g:rgrep_statusline` | `1` | 结果状态栏（数量、过滤条件和帮助提示） |
 | `g:rgrep_filetypes` | `{}` | 预览文件类型覆盖 |
 | `g:rgrep_open_all_limit` | `10` | `RgrepOpenAll` 的确认阈值 |
 | `g:rgrep_replace_confirm` | `1` | `RgrepReplace` 执行前确认 |

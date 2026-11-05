@@ -95,6 +95,7 @@ function! s:map_preview() abort
         \ 'search': ':<C-u>call rgrep#search_again()<CR>',
         \ 'filter': ':<C-u>call rgrep#filter()<CR>',
         \ 'quit': ':<C-u>call rgrep#close()<CR>',
+        \ 'help': ':<C-u>call rgrep#toggle_help()<CR>',
         \ }
 
   let mapped = []
@@ -108,7 +109,7 @@ function! s:map_preview() abort
         continue
       endif
       call win_execute(s:win,
-            \ 'silent! nnoremap <buffer> <silent> ' . key . ' ' . rhs)
+            \ 'silent! nnoremap <buffer> <nowait> <silent> ' . key . ' ' . rhs)
       call add(mapped, key)
     endfor
   endfor
@@ -394,6 +395,29 @@ function! s:set_message(msg) abort
   call win_execute(s:win, 'let &l:statusline = ' . string(' [preview] '))
 endfunction
 
+
+function! rgrep#preview#show_help(lines) abort
+  if !rgrep#preview#visible()
+    return
+  endif
+  let s:item = {}
+
+  let nr = s:ensure_buf()
+  if s:win_buf(s:win) != nr
+    call win_execute(s:win, 'silent! buffer ' . nr)
+    call s:map_preview()
+  endif
+
+  call s:set_lines(a:lines)
+  call s:set_filetype('')
+  call win_execute(s:win, 'setlocal nonumber norelativenumber')
+  call win_execute(s:win, 'setlocal nowrap')
+  call win_execute(s:win, 'silent! call clearmatches()')
+  call win_execute(s:win, 'setlocal nomodifiable')
+  call win_execute(s:win, 'silent! file ' . fnameescape('rgrep://help'))
+  call win_execute(s:win, 'let &l:statusline = ' . string(' Rgrep help '))
+  call win_execute(s:win, 'call cursor(1, 1)')
+endfunction
 
 function! rgrep#preview#buf() abort
   return s:buf
